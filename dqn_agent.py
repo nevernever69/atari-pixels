@@ -289,6 +289,7 @@ class DQNAgent:
         # Compile for speed if available and on CUDA only
         if hasattr(torch, 'compile') and self.device.type == 'cuda':
             self.policy_net = torch.compile(self.policy_net)
+            self.target_net = torch.compile(self.target_net) ## resolve _orig issues and for faster kernels
 
     def select_action(self, state, mode: str = 'greedy', temperature: float = 1.0, epsilon: float = 0.0) -> int:
         """

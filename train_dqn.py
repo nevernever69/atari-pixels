@@ -118,6 +118,8 @@ def evaluate_agent(agent, env, n_episodes=10, log_id=None, return_q_values=False
 
 
 def main():
+    torch.set_float32_matmul_precision('high') ## Let TF32 matmul use tensor cores (on Ampere+ GPUs)
+
     parser = argparse.ArgumentParser()
     parser.add_argument('--max_episodes', type=int, default=None)
     parser.add_argument('--min_buffer', type=int, default=None)

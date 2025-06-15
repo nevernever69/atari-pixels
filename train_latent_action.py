@@ -302,7 +302,8 @@ def train(args):
     if torch.cuda.is_available():
         device = torch.device('cuda')
         # CUDA-specific optimization settings
-        compile_mode = "default"  # Use the default backend for CUDA
+        # compile_mode = "default"  # Use the default backend for CUDA
+        compile_mode = "inductor"  # Use the inductor backend for CUDA
         use_amp = True  # Use automatic mixed precision for CUDA
         pin_memory = True  # Use pinned memory for faster data transfer
     elif torch.backends.mps.is_available():

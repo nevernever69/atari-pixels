@@ -53,6 +53,7 @@ def main():
     pygame.init()
     window = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
     pygame.display.set_caption("Neural Breakout")
+
     clock = pygame.time.Clock()
     font = pygame.font.SysFont('Arial', 18)
     
@@ -69,14 +70,29 @@ def main():
         world_model = torch.compile(world_model)
     
     # Load action-to-latent model
+    # print("[INFO] Loading action-to-latent model...")
+    # action_model = ActionStateToLatentMLP().to(device)
+    # ckpt = torch.load('checkpoints/latent_action/action_state_to_latent_best.pt', map_location=device)
+    # action_model.load_state_dict(ckpt['model_state_dict'])
+    # action_model.eval()
+
     print("[INFO] Loading action-to-latent model...")
     action_model = ActionStateToLatentMLP().to(device)
-    ckpt = torch.load('checkpoints/latent_action/action_state_to_latent_best.pt', map_location=device)
-    action_model.load_state_dict(ckpt['model_state_dict'])
+    ckpt_path = 'checkpoints/latent_action/action_state_to_latent_best.pt'
+    ckpt = torch.load(ckpt_path, map_location=device)
+
+    # Handle _orig_mod. prefix in state_dict
+    state_dict = ckpt['model_state_dict']
+    new_state_dict = {}
+    for key, value in state_dict.items():
+        new_key = key.replace('_orig_mod.', '')  # Strip _orig_mod. prefix
+        new_state_dict[new_key] = value
+    action_model.load_state_dict(new_state_dict)
     action_model.eval()
+
     if device.type == 'cuda':
         action_model = torch.compile(action_model)
-    
+
     # Load initial frame
     print("[INFO] Loading initial frame...")
     init_img = Image.open('data/0.png').convert('RGB')
