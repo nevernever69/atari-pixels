@@ -232,33 +232,6 @@ class DQNCNN(nn.Module):
         return self.fc(x)
 
 class DQNAgent:
-    """Deep Q-Network agent implementing several DQN improvements.
-    
-    Key Features:
-    1. Double DQN: Uses two networks to prevent Q-value overestimation
-       - Policy network: Selects actions
-       - Target network: Evaluates actions
-       This prevents the positive bias in Q-value estimation that occurs
-       when the same network both selects and evaluates actions.
-       
-    2. Experience Replay: Stores and randomly samples transitions
-       - Breaks correlation between consecutive samples
-       - Allows multiple updates from each experience
-       - Improves sample efficiency
-       
-    3. Q-value normalization: Prevents any action from dominating
-       - Subtracts mean and divides by std
-       - Helps maintain reasonable Q-value ranges
-       
-    4. Huber Loss: More robust to outliers than MSE
-       - Combines L2 loss for small errors
-       - L1 loss for large errors
-       - Helps prevent unstable updates
-       
-    5. Gradient clipping: Prevents explosive gradients
-       - Clips gradient norm to 1.0
-       - Maintains stable updates
-    """
     def __init__(self, n_actions: int, state_shape, replay_buffer=None, prioritized=False, per_alpha=0.6, per_beta=0.4):
         """Initialize DQN agent with networks and replay buffer."""
         self.n_actions = n_actions
@@ -286,10 +259,10 @@ class DQNAgent:
         self.policy_net.to(self.device)
         self.target_net.to(self.device)
         self.optimizer = optim.Adam(self.policy_net.parameters(), lr=self.learning_rate)
-        # Compile for speed if available and on CUDA only
+        # Compile both networks for speed if available and on CUDA
         if hasattr(torch, 'compile') and self.device.type == 'cuda':
             self.policy_net = torch.compile(self.policy_net)
-            self.target_net = torch.compile(self.target_net) ## resolve _orig issues and for faster kernels
+            self.target_net = torch.compile(self.target_net)
 
     def select_action(self, state, mode: str = 'greedy', temperature: float = 1.0, epsilon: float = 0.0) -> int:
         """

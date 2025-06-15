@@ -2,7 +2,7 @@ import os
 import numpy as np
 import torch
 from tqdm import trange
-from atari_env import AtariBreakoutEnv
+from atari_env import AtariEnduroEnv  # Updated import
 from dqn_agent import DQNAgent, ReplayBuffer
 import cv2
 import json
@@ -16,12 +16,12 @@ from collections import deque
 
 # Config
 config = {
-    'env_name': 'Breakout',
-    'n_actions': 4,
+    'env_name': 'Enduro',
+    'n_actions': 9,  # Enduro has 9 actions
     'state_shape': (8, 84, 84),
-    'max_episodes': 10000,
-    'max_steps': 1000,
-    'target_update_freq': 10000, #since i'm doing 5 update steps per environment step, this means 200*5=1000 steps between target network updates
+    'max_episodes': 2000,
+    'max_steps': 10000,  # Increased to 10,000 as suggested
+    'target_update_freq': 10000,  # 2000 environment steps with 5 updates/step
     'checkpoint_dir': 'checkpoints',
     'data_dir': 'data/raw_gameplay',
     'actions_dir': 'data/actions',
@@ -37,7 +37,6 @@ torch.manual_seed(config['seed'])
 random.seed(config['seed'])
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
-
 
 def save_episode_data(frames, actions, rewards, skill_level, episode_idx, config):
     """Save frames as PNGs and actions/rewards as JSON."""
@@ -59,7 +58,6 @@ def save_episode_data(frames, actions, rewards, skill_level, episode_idx, config
     all_actions.append({'episode': episode_idx, 'actions': actions_json})
     with open(actions_file, 'w') as f:
         json.dump(all_actions, f, indent=2)
-
 
 def evaluate_agent(agent, env, n_episodes=10, log_id=None, return_q_values=False):
     """Evaluate agent and return average reward. Optionally return all Q-values for wandb logging."""
@@ -116,10 +114,9 @@ def evaluate_agent(agent, env, n_episodes=10, log_id=None, return_q_values=False
         return np.mean(rewards), np.concatenate(all_q_values)
     return np.mean(rewards)
 
-
 def main():
-    torch.set_float32_matmul_precision('high') ## Let TF32 matmul use tensor cores (on Ampere+ GPUs)
-
+    if torch.cuda.is_available():
+        torch.set_float32_matmul_precision('high')
     parser = argparse.ArgumentParser()
     parser.add_argument('--max_episodes', type=int, default=None)
     parser.add_argument('--min_buffer', type=int, default=None)
@@ -151,12 +148,11 @@ def main():
         )
         epsilon_start = 1.0
         epsilon_final = 0.1
-        epsilon_decay_steps = 1_000_000
+        epsilon_decay_steps = 50000
     else:
         shared_replay_buffer = ReplayBuffer(capacity=1000000)
         exploration_agent = DQNAgent(n_actions=config['n_actions'], state_shape=config['state_shape'], replay_buffer=shared_replay_buffer)
         exploitation_agent = DQNAgent(n_actions=config['n_actions'], state_shape=config['state_shape'], replay_buffer=shared_replay_buffer)
-        from rnd import RandomNetworkDistillation
         rnd = RandomNetworkDistillation(state_shape=config['state_shape'], output_dim=512, lr=1e-5, reward_scale=0.1)
         alpha = 0.5
         alpha_decay = 0.99995
@@ -174,7 +170,7 @@ def main():
 
     # Fill replay buffer with random actions first
     print("Pre-filling replay buffer with random experiences...")
-    env = AtariBreakoutEnv()
+    env = AtariEnduroEnv()  # Updated environment
     obs, info = env.reset()
     state_stack = np.stack([obs] * 8, axis=0)
     replay_buffer = agent.replay_buffer if exploration_mode == 'epsilon' else shared_replay_buffer
@@ -183,11 +179,6 @@ def main():
         next_obs, reward, terminated, truncated, info = env.step(action)
         next_state_stack = np.roll(state_stack, shift=-1, axis=0)
         next_state_stack[-1] = next_obs
-        # Add small random priority variation during prefill
-        #random_priority = random.uniform(0.1, 1.0)
-        # For prefill, set intrinsic reward to 0
-        #replay_buffer.push(state_stack, action, reward, 0.0, next_state_stack, terminated or truncated, random_priority)
-        # state, action, extrinsic_reward, intrinsic_reward, next_state, done
         replay_buffer.push(state_stack, action, reward, 0.0, next_state_stack, terminated or truncated)
         state_stack = next_state_stack
         if terminated or truncated:
@@ -196,13 +187,13 @@ def main():
         if step % 1000 == 0:
             print(f"  {step}/{max(5000, config['min_buffer'])} experiences collected")
 
-    eval_env = AtariBreakoutEnv()
+    eval_env = AtariEnduroEnv()  # Updated environment
 
     window_size_for_logs = 30
     running_losses = deque(maxlen=window_size_for_logs)
     running_td_errors = deque(maxlen=window_size_for_logs)
     running_rewards = deque(maxlen=window_size_for_logs)
-    log_into_wandb=False
+    log_into_wandb = False
     for episode in pbar:
         losses = []
         td_errors = []
@@ -211,8 +202,7 @@ def main():
             log_id = f"ep{episode}"
             eval_reward, q_value_dist = evaluate_agent(agent, eval_env, n_episodes=5, log_id=log_id, return_q_values=True)
             policy_str = f"Policy eval: {eval_reward:.1f}"
-            log_into_wandb=True
-            
+            log_into_wandb = True
         else:
             policy_str = ""
 
@@ -269,11 +259,8 @@ def main():
                 last_10_explore = exploration_rewards[-10:]
                 last_10_exploit = exploitation_rewards[-10:]
                 print(f"[Stats] Episodes {episode-9}-{episode} | Explore Avg: {np.mean(last_10_explore):.2f} | Exploit Avg: {np.mean(last_10_exploit):.2f} | {policy_str}")
-                
-                
-                
         else:
-            # --- RND mode (original logic) ---
+            # --- RND mode ---
             for step in range(config['max_steps']):
                 action = exploration_agent.select_action(state_stack, mode='softmax', temperature=1.0, epsilon=config['epsilon'])
                 next_obs, extrinsic_reward, terminated, truncated, info = env.step(action)
@@ -334,11 +321,10 @@ def main():
                 print(f"RND Stats: {rnd.get_stats()}")
                 intrinsic_ratio = np.mean(last_10_intrinsic) / (np.mean(np.abs(last_10_exploit)) + 1e-8)
                 print(f"Intrinsic/Extrinsic ratio: {intrinsic_ratio:.2f}")
-        
+
         if log_into_wandb:
             # Log to wandb
             try:
-                # Get weight and grad norms
                 weight_norms = agent.get_weight_norms()
                 grad_norms = agent.get_grad_norms()
                 wandb.log({
@@ -368,9 +354,8 @@ def main():
                 }, step=episode)
             except Exception as e:
                 print(f"[wandb] Logging failed: {e}")
-            
-            log_into_wandb=False
-        
+            log_into_wandb = False
+
         if episode % config['save_freq'] == 0:
             checkpoint_path = os.path.join(config['checkpoint_dir'], 'dqn_latest.pth')
             torch.save(agent.policy_net.state_dict(), checkpoint_path)
@@ -388,4 +373,4 @@ def main():
     print("Training finished.")
 
 if __name__ == '__main__':
-    main() 
+    main()
